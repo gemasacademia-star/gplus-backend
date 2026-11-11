@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database.config.js';
 import { ApiError } from '../../shared/utils/error.util.js';
 import * as Validators from './validators/inscripcion.validator.js';
+import { detectarRegimenAlumno } from './logic/inscripcion.logic.js';
 import { inscripcionService } from './inscripcion.service.js';
 import { whereTipoInscripcion, TIPO_INSCRIPCION } from '../../shared/utils/tipo-inscripcion.util.js';
 import { formatearHorario, HORARIO_SELECT } from '../horarios/horario.service.js';
@@ -62,14 +63,16 @@ const evaluarPaquete = async (idAlumno, cuentaId, enCurso, limite) => {
   const detalle = await inscripcionService.obtenerUltimoPlanAlumno(idAlumno, cuentaId);
   const horarioIds = detalle.horarios.map((h) => h.id);
 
+  // El plan sigue el régimen del alumno (Antiguo -> planes legacy, Nuevo -> vigentes).
+  const esLegacy = await detectarRegimenAlumno(prisma, idAlumno);
   const candidatos = await prisma.catalogo_conceptos.findMany({
-    where: { activo: true, es_vigente: true, cantidad_clases_semanal: horarioIds.length },
+    where: { activo: true, es_vigente: !esLegacy, cantidad_clases_semanal: horarioIds.length },
   });
   const historico = await prisma.cuentas_por_cobrar.findUnique({
     where: { id: cuentaId },
     select: { catalogo_conceptos: true },
   });
-  const vigente = elegirConceptoVigente(candidatos, historico?.catalogo_conceptos, horarioIds.length);
+  const vigente = elegirConceptoVigente(candidatos, historico?.catalogo_conceptos, horarioIds.length, { esLegacy });
 
   let motivo = null;
   if (!detalle.tiene_plan_previo || horarioIds.length === 0) motivo = 'El paquete histórico no tiene horarios.';
@@ -168,13 +171,15 @@ export const renovacionHistoricaService = {
     if (horario_ids?.length && ids.length !== horario_ids.length)
       throw new ApiError('No se pueden repetir horarios.', 400);
 
+    const esLegacy = await detectarRegimenAlumno(prisma, idAlumno);
     const concepto = horario_ids?.length
       ? elegirConceptoVigente(
           await prisma.catalogo_conceptos.findMany({
-            where: { activo: true, es_vigente: true, cantidad_clases_semanal: ids.length },
+            where: { activo: true, es_vigente: !esLegacy, cantidad_clases_semanal: ids.length },
           }),
           null,
-          ids.length
+          ids.length,
+          { esLegacy }
         )
       : evaluacion._vigente;
     if (!concepto) throw new ApiError(`No existe un plan vigente para ${ids.length} clases por semana.`, 400);
@@ -196,7 +201,6 @@ export const renovacionHistoricaService = {
         alumno_id: idAlumno,
         horario_ids: ids,
         fecha_inicio_electiva: fechaInicio,
-        forzar_concepto_vigente: true,
       });
     } catch (error) {
       if (error instanceof ApiError) throw error;
