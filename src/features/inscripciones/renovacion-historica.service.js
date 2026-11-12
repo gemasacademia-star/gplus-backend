@@ -2,6 +2,7 @@ import { prisma } from '../../config/database.config.js';
 import { ApiError } from '../../shared/utils/error.util.js';
 import * as Validators from './validators/inscripcion.validator.js';
 import { detectarRegimenAlumno } from './logic/inscripcion.logic.js';
+import { resolverPlanPorRegimen } from './utils/plan-catalogo.util.js';
 import { inscripcionService } from './inscripcion.service.js';
 import { whereTipoInscripcion, TIPO_INSCRIPCION } from '../../shared/utils/tipo-inscripcion.util.js';
 import { formatearHorario, HORARIO_SELECT } from '../horarios/horario.service.js';
@@ -10,7 +11,6 @@ import {
   ESTADOS_EN_CURSO,
   esPaqueteFinalizado,
   existeInscripcionEquivalente,
-  elegirConceptoVigente,
   ordenarAlternativas,
 } from './utils/renovacion.util.js';
 
@@ -65,14 +65,11 @@ const evaluarPaquete = async (idAlumno, cuentaId, enCurso, limite) => {
 
   // El plan sigue el régimen del alumno (Antiguo -> planes legacy, Nuevo -> vigentes).
   const esLegacy = await detectarRegimenAlumno(prisma, idAlumno);
-  const candidatos = await prisma.catalogo_conceptos.findMany({
-    where: { activo: true, es_vigente: !esLegacy, cantidad_clases_semanal: horarioIds.length },
-  });
+  const vigente = await resolverPlanPorRegimen(prisma, horarioIds.length, esLegacy);
   const historico = await prisma.cuentas_por_cobrar.findUnique({
     where: { id: cuentaId },
     select: { catalogo_conceptos: true },
   });
-  const vigente = elegirConceptoVigente(candidatos, historico?.catalogo_conceptos, horarioIds.length, { esLegacy });
 
   let motivo = null;
   if (!detalle.tiene_plan_previo || horarioIds.length === 0) motivo = 'El paquete histórico no tiene horarios.';
@@ -173,14 +170,7 @@ export const renovacionHistoricaService = {
 
     const esLegacy = await detectarRegimenAlumno(prisma, idAlumno);
     const concepto = horario_ids?.length
-      ? elegirConceptoVigente(
-          await prisma.catalogo_conceptos.findMany({
-            where: { activo: true, es_vigente: !esLegacy, cantidad_clases_semanal: ids.length },
-          }),
-          null,
-          ids.length,
-          { esLegacy }
-        )
+      ? await resolverPlanPorRegimen(prisma, ids.length, esLegacy)
       : evaluacion._vigente;
     if (!concepto) throw new ApiError(`No existe un plan vigente para ${ids.length} clases por semana.`, 400);
 

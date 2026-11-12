@@ -27,6 +27,7 @@ import {
 } from '../../shared/utils/ciclo.util.js';
 import { agruparCiclosPorCuenta, calcularEstadoCiclo, horariosYaEnCurso } from './utils/historial-ciclos.util.js';
 import { restaurarBeneficiosConsumidos } from './utils/beneficios.util.js';
+import { resolverPlanPorRegimen } from './utils/plan-catalogo.util.js';
 // 🎯 BL-001 / BL-003
 import {
   TIPO_INSCRIPCION,
@@ -81,14 +82,13 @@ export const inscripcionService = {
 
         // 👮‍♂️ PASO 2: VALIDACIÓN DE CAPACIDAD Y BUSQUEDA DE PLAN
         // Buscamos el plan según la cantidad de horarios que el alumno está comprando HOY.
-        const conceptoAplicar = await tx.catalogo_conceptos.findFirst({
-          where: {
-            cantidad_clases_semanal: horario_ids.length,
-            activo: true,
-            // BL-004: la renovación histórica fuerza el concepto vigente actual.
-            es_vigente: forzar_concepto_vigente ? true : !esAlumnoLegacy
-          }
-        });
+        // El plan sale del régimen del alumno (Antiguo -> legacy, Nuevo -> vigente) y nunca
+        // bloquea: ver utils/plan-catalogo.util.js. `forzar_concepto_vigente` sigue disponible.
+        const conceptoAplicar = await resolverPlanPorRegimen(
+          tx,
+          horario_ids.length,
+          forzar_concepto_vigente ? false : esAlumnoLegacy
+        );
 
         if (!conceptoAplicar) {
           throw new Error(`⛔ No existe un plan para ${horario_ids.length} clases en el catálogo.`);
@@ -312,13 +312,7 @@ export const inscripcionService = {
         const esAlumnoLegacy = await Logic.detectarRegimenAlumno(tx, alumnoId);
 
         // 2. 🌟 BÚSQUEDA DINÁMICA: Buscamos el plan que calce con sus clases actuales
-        const planAdecuado = await tx.catalogo_conceptos.findFirst({
-          where: {
-            cantidad_clases_semanal: totalCursosActivos,
-            activo: true,
-            es_vigente: !esAlumnoLegacy
-          }
-        });
+        const planAdecuado = await resolverPlanPorRegimen(tx, totalCursosActivos, esAlumnoLegacy);
 
         if (!planAdecuado) {
           console.log(`⚠️ No hay plan para ${totalCursosActivos} clases para el alumno ${alumnoId}`);
@@ -674,13 +668,7 @@ export const inscripcionService = {
 
         if (inscPaq.length > 0) {
           const esLegacy = await Logic.detectarRegimenAlumno(tx, inscripcion.alumno_id)
-          const cpto = await tx.catalogo_conceptos.findFirst({
-            where: {
-              activo: true,
-              es_vigente: !esLegacy,
-              cantidad_clases_semanal: inscPaq.length,
-            }
-          })
+          const cpto = await resolverPlanPorRegimen(tx, inscPaq.length, esLegacy)
           if (!cpto) throw new Error('Concepto de pago no encontrado');
 
           // 💰 BL-002: normalizado a 2 decimales, como en inscribirPaquete.
