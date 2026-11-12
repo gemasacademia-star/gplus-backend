@@ -25,6 +25,9 @@ import {
   sumarDiasUTC,
   rangoMesUTC,
 } from '../../shared/utils/ciclo.util.js';
+import { agruparCiclosPorCuenta, calcularEstadoCiclo, horariosYaEnCurso } from './utils/historial-ciclos.util.js';
+import { restaurarBeneficiosConsumidos } from './utils/beneficios.util.js';
+import { resolverPlanPorRegimen } from './utils/plan-catalogo.util.js';
 // 🎯 BL-001 / BL-003
 import {
   TIPO_INSCRIPCION,
@@ -69,6 +72,9 @@ export const inscripcionService = {
       return await prisma.$transaction(async (tx) => {
         // 🛡️ PASO 0: MUROS DE SEGURIDAD (Regla de Oro: Muro de Deuda)
         await Validators.validarMuroDeDeuda(tx, alumno_id);
+        // 🛡️ Un horario que el alumno ya tiene en curso no se vuelve a inscribir
+        // (duplicaba el paquete: mismo horario ACTIVO + otro POR_VALIDAR).
+        await Validators.validarHorariosNoDuplicados(tx, alumno_id, horario_ids, horariosYaEnCurso);
 
         // 🕵️‍♂️ PASO 1: DETECTIVE DE RÉGIMEN (Solo para saber si es Legacy o 2026)
         // Borramos Logic.calcularCicloUpgrade porque ya no hay sincronización.
@@ -76,14 +82,13 @@ export const inscripcionService = {
 
         // 👮‍♂️ PASO 2: VALIDACIÓN DE CAPACIDAD Y BUSQUEDA DE PLAN
         // Buscamos el plan según la cantidad de horarios que el alumno está comprando HOY.
-        const conceptoAplicar = await tx.catalogo_conceptos.findFirst({
-          where: {
-            cantidad_clases_semanal: horario_ids.length,
-            activo: true,
-            // BL-004: la renovación histórica fuerza el concepto vigente actual.
-            es_vigente: forzar_concepto_vigente ? true : !esAlumnoLegacy
-          }
-        });
+        // El plan sale del régimen del alumno (Antiguo -> legacy, Nuevo -> vigente) y nunca
+        // bloquea: ver utils/plan-catalogo.util.js. `forzar_concepto_vigente` sigue disponible.
+        const conceptoAplicar = await resolverPlanPorRegimen(
+          tx,
+          horario_ids.length,
+          forzar_concepto_vigente ? false : esAlumnoLegacy
+        );
 
         if (!conceptoAplicar) {
           throw new Error(`⛔ No existe un plan para ${horario_ids.length} clases en el catálogo.`);
@@ -307,13 +312,7 @@ export const inscripcionService = {
         const esAlumnoLegacy = await Logic.detectarRegimenAlumno(tx, alumnoId);
 
         // 2. 🌟 BÚSQUEDA DINÁMICA: Buscamos el plan que calce con sus clases actuales
-        const planAdecuado = await tx.catalogo_conceptos.findFirst({
-          where: {
-            cantidad_clases_semanal: totalCursosActivos,
-            activo: true,
-            es_vigente: !esAlumnoLegacy
-          }
-        });
+        const planAdecuado = await resolverPlanPorRegimen(tx, totalCursosActivos, esAlumnoLegacy);
 
         if (!planAdecuado) {
           console.log(`⚠️ No hay plan para ${totalCursosActivos} clases para el alumno ${alumnoId}`);
@@ -669,13 +668,7 @@ export const inscripcionService = {
 
         if (inscPaq.length > 0) {
           const esLegacy = await Logic.detectarRegimenAlumno(tx, inscripcion.alumno_id)
-          const cpto = await tx.catalogo_conceptos.findFirst({
-            where: {
-              activo: true,
-              es_vigente: !esLegacy,
-              cantidad_clases_semanal: inscPaq.length,
-            }
-          })
+          const cpto = await resolverPlanPorRegimen(tx, inscPaq.length, esLegacy)
           if (!cpto) throw new Error('Concepto de pago no encontrado');
 
           // 💰 BL-002: normalizado a 2 decimales, como en inscribirPaquete.
@@ -865,6 +858,16 @@ export const inscripcionService = {
       }
 
       // 3. LIMPIEZA TOTAL
+      // 🎁 Antes de borrar los descuentos, el beneficio que los originó vuelve a la
+      // cola: sin esto la cuenta desaparecía pero el beneficio quedaba `usado`
+      // para siempre (caso Jhoel: MEDIA BECA S/75 perdida tras borrar su reserva).
+      if (cuenta) {
+        const descuentosAplicados = await tx.descuentos_aplicados.findMany({
+          where: { cuenta_id: parseInt(cuentaId) },
+          select: { tipo_beneficio_id: true },
+        });
+        await restaurarBeneficiosConsumidos(tx, cuenta.alumno_id, descuentosAplicados);
+      }
       await tx.inscripciones_deudas_link.deleteMany({ where: { cuenta_id: parseInt(cuentaId) } });
       await tx.descuentos_aplicados.deleteMany({ where: { cuenta_id: parseInt(cuentaId) } });
       await tx.pagos.deleteMany({ where: { cuenta_id: parseInt(cuentaId) } });
@@ -1721,7 +1724,7 @@ export const inscripcionService = {
         orderBy: { fecha_inscripcion: 'desc' }
       });
 
-      const historialMeses = construirHistorialCiclos(inscripcionesBrutas);
+      const historialMeses = agruparCiclosPorCuenta(construirHistorialCiclos(inscripcionesBrutas));
 
       // 🆕 BL-012: sin params el resultado es el histórico completo, igual que antes.
       if (!mesAnio) return historialMeses;
@@ -1780,17 +1783,21 @@ export const inscripcionService = {
 
       const { desde, hasta } = rangoMesUTC(mes, anio);
 
-      const ciclos = todosLosCiclos
-        .filter((fila) => cicloSolapaMes(fila.fecha_inicio_ciclo, fila.fecha_fin_ciclo, mes, anio))
-        .map((fila) => ({
-          ...fila,
-          desglose_mes: desgloseDelTramo(
-            fila,
-            asistenciasPorInscripcion.get(fila.inscripcion_id) || [],
-            desde,
-            hasta
-          )
-        }));
+      // Un paquete de N clases/semana = N filas con la misma cuenta y ciclo: se
+      // calcula el desglose por inscripción y luego se fusionan en UN ciclo.
+      const ciclos = agruparCiclosPorCuenta(
+        todosLosCiclos
+          .filter((fila) => cicloSolapaMes(fila.fecha_inicio_ciclo, fila.fecha_fin_ciclo, mes, anio))
+          .map((fila) => ({
+            ...fila,
+            desglose_mes: desgloseDelTramo(
+              fila,
+              asistenciasPorInscripcion.get(fila.inscripcion_id) || [],
+              desde,
+              hasta
+            )
+          }))
+      );
 
       const resumen_mes = ciclos.reduce((acc, c) => ({
         total_clases: acc.total_clases + c.desglose_mes.total_clases,
@@ -1806,7 +1813,7 @@ export const inscripcionService = {
         rango_mes: { desde, hasta },
         // 🎯 Alimenta el selector del frontend sin una segunda llamada. Se
         // calcula sobre TODOS los ciclos, no solo los del mes pedido.
-        meses_disponibles: construirMesesDisponibles(todosLosCiclos),
+        meses_disponibles: construirMesesDisponibles(agruparCiclosPorCuenta(todosLosCiclos)),
         total_ciclos: ciclos.length,
         resumen_mes,
         ciclos,
@@ -1865,6 +1872,12 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
   const fin = aFechaUTC(link.fecha_fin_ciclo);
   const corte = finCicloEfectivo(link.fecha_inicio_ciclo, link.fecha_fin_ciclo);
   const esVigente = link.fecha_fin_ciclo === null;
+  const estadoCiclo = calcularEstadoCiclo({
+    fechaFin: fin,
+    corte,
+    estadoInscripcion: inscripcion.estado,
+    hoy: aFechaUTC(diaLimaAFechaUTC()),
+  });
 
   return {
     ...datosInscripcion(inscripcion),
@@ -1882,12 +1895,14 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
     es_estimado: link.es_estimado,              // true = viene del backfill
 
     // --- 🆕 llaves aditivas (el front puede ignorarlas sin romperse) ---
-    estado_ciclo: esVigente ? 'VIGENTE' : 'CERRADO',
+    // VIGENTE | VENCIDO (corte pasado, en tolerancia) | CERRADO. `es_vigente`
+    // conserva su significado histórico (fecha_fin_ciclo === null).
+    estado_ciclo: estadoCiclo,
     es_vigente: esVigente,
     sin_vigencia: inicio === null,              // sin fecha_inicio_ciclo en BD
     dias_ciclo: diasEntreUTC(inicio, corte),
     fecha_inicio_ciclo_label: formatFechaEs(inicio),
-    fecha_fin_ciclo_label: fin ? formatFechaEs(fin) : 'Vigente',
+    fecha_fin_ciclo_label: fin ? formatFechaEs(fin) : (estadoCiclo === 'VENCIDO' ? 'Vencido' : estadoCiclo === 'CERRADO' ? 'Sin fecha de cierre' : 'Vigente'),
     fecha_corte_ciclo_label: formatFechaEs(corte),
     fecha_vencimiento_pago: cuenta?.fecha_vencimiento ?? null,
   };
