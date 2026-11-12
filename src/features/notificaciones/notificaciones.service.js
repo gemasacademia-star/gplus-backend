@@ -1,9 +1,9 @@
 import { prisma } from '../../config/database.config.js';
 
 export const notificacionesService = {
-  // Para que los Crons usen esta función
-  crear: async (data) => {
-    return await prisma.notificaciones.create({
+  // Para que los Crons y transacciones usen esta función
+  crear: async (data, db = prisma) => {
+    return await db.notificaciones.create({
       data: {
         alumno_id: data.alumnoId || null,
         titulo: data.titulo,

@@ -100,12 +100,14 @@ export const historialAcademicoService = {
           const fechas = insc.registros_asistencia.map((r) => r.fecha);
           todasLasFechas = todasLasFechas.concat(fechas);
 
-          const horarioKey = `${hc?.dia_semana}-${hc?.hora_inicio}`;
+          const sedeNombre = hc?.canchas?.sedes?.nombre || 'S/D';
+          const horarioKey = `${hc?.dia_semana}-${hc?.hora_inicio}-${sedeNombre}`;
           if (hc && !horariosUnicos.has(horarioKey)) {
             horariosUnicos.set(horarioKey, {
               dia: MAPA_DIAS[hc.dia_semana] ?? 'S/D',
               hora_inicio: formatTime(hc.hora_inicio),
               hora_fin: formatTime(hc.hora_fin),
+              sede: sedeNombre,
             });
           }
 
@@ -113,7 +115,7 @@ export const historialAcademicoService = {
             inscripcion_id: insc.id,
             estado: insc.estado,
             tipo_inscripcion: insc.tipo_inscripcion,
-            sede: hc?.canchas?.sedes?.nombre || 'S/D',
+            sede: sedeNombre,
             nivel: hc?.niveles_entrenamiento?.nombre || 'S/D',
             profesor: hc?.coordinadores?.usuarios?.nombres || 'S/D',
             total_clases: fechas.length,
@@ -657,8 +659,8 @@ export const historialAcademicoService = {
         // última de la lista (la más antigua por fecha_inscripcion).
         const masAntigua = inscripciones.some((i) => i.creado_en)
           ? [...inscripciones]
-              .filter((i) => i.creado_en)
-              .sort((a, b) => new Date(a.creado_en) - new Date(b.creado_en))[0]
+            .filter((i) => i.creado_en)
+            .sort((a, b) => new Date(a.creado_en) - new Date(b.creado_en))[0]
           : inscripciones[inscripciones.length - 1];
         const sedeOrigen = masAntigua?.horarios_clases?.canchas?.sedes?.nombre || 'N/A';
 
