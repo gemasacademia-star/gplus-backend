@@ -1430,13 +1430,13 @@ export const inscripcionService = {
       plan:
         conceptoPlan && conceptoPlan.activo
           ? {
-              id: conceptoPlan.id,
-              codigo_interno: conceptoPlan.codigo_interno,
-              nombre: conceptoPlan.nombre,
-              precio_base: Number(conceptoPlan.precio_base),
-              cantidad_clases_semanal: conceptoPlan.cantidad_clases_semanal,
-              activo: conceptoPlan.activo,
-            }
+            id: conceptoPlan.id,
+            codigo_interno: conceptoPlan.codigo_interno,
+            nombre: conceptoPlan.nombre,
+            precio_base: Number(conceptoPlan.precio_base),
+            cantidad_clases_semanal: conceptoPlan.cantidad_clases_semanal,
+            activo: conceptoPlan.activo,
+          }
           : null,
       ultimo_ciclo: ultimoCiclo,
       // Se formatea en UTC a propósito: diaLimaAFechaUTC y sumarDiasUTC trabajan
@@ -1884,7 +1884,7 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
 
     numero_mes_ciclo: numeroMesCiclo,
     fecha_inicio_ciclo: inicio,                 // ✅ dato real del link, normalizado en UTC
-    fecha_fin_ciclo: fin,                       // ✅ null si sigue vigente
+    fecha_fin_ciclo: corte,                       // ✅ null si sigue vigente
     // 🔧 BL-011: antes acá venía cuenta.fecha_vencimiento, que es el PLAZO DE
     // PAGO (hoy + 2 días), no el fin del ciclo. Ahora es el fin real.
     // El plazo de pago no se pierde: va en fecha_vencimiento_pago.
@@ -1902,7 +1902,7 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
     sin_vigencia: inicio === null,              // sin fecha_inicio_ciclo en BD
     dias_ciclo: diasEntreUTC(inicio, corte),
     fecha_inicio_ciclo_label: formatFechaEs(inicio),
-    fecha_fin_ciclo_label: fin ? formatFechaEs(fin) : (estadoCiclo === 'VENCIDO' ? 'Vencido' : estadoCiclo === 'CERRADO' ? 'Sin fecha de cierre' : 'Vigente'),
+    fecha_fin_ciclo_label: corte ? formatFechaEs(corte) : (estadoCiclo === 'VENCIDO' ? 'Vencido' : estadoCiclo === 'CERRADO' ? 'Sin fecha de cierre' : 'Vigente'),
     fecha_corte_ciclo_label: formatFechaEs(corte),
     fecha_vencimiento_pago: cuenta?.fecha_vencimiento ?? null,
   };
