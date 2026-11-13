@@ -100,7 +100,7 @@ export const finCicloEfectivo = (inicio, fin) => {
   if (fin) return aFechaUTC(fin);
   const ini = aFechaUTC(inicio);
   if (!ini) return null;
-  return sumarDiasUTC(ini, DIAS_CICLO);
+  return sumarDiasUTC(ini, 29);
 };
 
 /**
