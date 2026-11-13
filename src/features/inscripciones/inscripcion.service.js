@@ -1870,7 +1870,7 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
   const cuenta = link.cuentas_por_cobrar;
   const inicio = aFechaUTC(link.fecha_inicio_ciclo);
   const fin = aFechaUTC(link.fecha_fin_ciclo);
-  const corte = finCicloEfectivo(link.fecha_inicio_ciclo, link.fecha_fin_ciclo);
+  const corte = finCicloEfectivo(inscripcion.fecha_inscripcion, null);
   const esVigente = link.fecha_fin_ciclo === null;
   const estadoCiclo = calcularEstadoCiclo({
     fechaFin: fin,
