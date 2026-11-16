@@ -30,6 +30,10 @@ export const TZ_LIMA = 'America/Lima';
 // regla del badge de la tabla de alumnos.
 export const DIAS_CICLO = 30;
 
+// Último día del ciclo contado desde el inicio: día 1 = inicio, último = inicio + 29.
+// Es la fecha que se guarda/muestra como fin; DIAS_CICLO es CUÁNDO cierra el VERDUGO.
+export const ULTIMO_DIA_CICLO = DIAS_CICLO - 1;
+
 // Lo que se vende es CLASES, no días calendario: el plan mensual de 1 día a la
 // semana garantiza exactamente 5 clases por ciclo. DIAS_CICLO (30) es solo el
 // cierre administrativo que aplica el VERDUGO; un cambio de horario genera por
@@ -93,14 +97,14 @@ export const diasEntreUTC = (desde, hasta) => {
 /**
  * 🎯 BL-011: fin real del ciclo.
  * fecha_fin_ciclo es NULL mientras el ciclo está abierto, así que se deriva
- * fecha_inicio_ciclo + 30d, que es el cierre que aplicará el cron VERDUGO.
- * Misma definición que ya usaba el exportador BL-013.
+ * fecha_inicio_ciclo + ULTIMO_DIA_CICLO (29d): el último día del ciclo, que es
+ * lo que el cron VERDUGO guarda como fecha_fin_ciclo al cerrarlo.
  */
 export const finCicloEfectivo = (inicio, fin) => {
   if (fin) return aFechaUTC(fin);
   const ini = aFechaUTC(inicio);
   if (!ini) return null;
-  return sumarDiasUTC(ini, 29);
+  return sumarDiasUTC(ini, ULTIMO_DIA_CICLO);
 };
 
 /**
@@ -117,7 +121,7 @@ export const rangoMesUTC = (mes, anio) => ({
  *
  * ⚠️ Divergencia deliberada con dashboard.service.js, que trata
  * fecha_fin_ciclo === null como "abierto para siempre". Acá un ciclo abierto
- * vale inicio + 30d, porque BL-011 fija que el ciclo regular dura 30 días.
+ * vale inicio + 29d: el ciclo regular dura 30 días calendario contando el inicio.
  */
 export const cicloSolapaMes = (inicio, fin, mes, anio) => {
   const ini = aFechaUTC(inicio);

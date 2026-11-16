@@ -21,7 +21,7 @@ import { ESTADOS_CLASE_VIGENTE } from './reprogramacion-ciclo.util.js';
 // `finCicloEfectivo()` y lo aplica el VERDUGO a los 30 días de
 // `fecha_inscripcion`. Si la última clase cae más allá de ese cierre, NO se
 // graba el fin: se corre el ancla (fecha_inscripcion + fecha_inicio_ciclo) lo
-// justo para que el +30 derivado la cubra (mismo mecanismo que BL-005, ver
+// justo para que el corte derivado (+29) la cubra (mismo mecanismo que BL-005, ver
 // reprogramacion-ciclo.util.js).
 // =================================================================
 

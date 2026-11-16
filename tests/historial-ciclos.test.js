@@ -6,6 +6,8 @@ import {
   horariosYaEnCurso,
 } from '../src/features/inscripciones/utils/historial-ciclos.util.js';
 import { elegirConceptoVigente } from '../src/features/inscripciones/utils/renovacion.util.js';
+import { construirHistorialCiclos } from '../src/features/inscripciones/inscripcion.service.js';
+import { finCicloEfectivo } from '../src/shared/utils/ciclo.util.js';
 
 const d = (s) => new Date(`${s}T00:00:00.000Z`);
 
@@ -70,4 +72,33 @@ test('elegirConceptoVigente respeta el régimen: Antiguo -> legacy, Nuevo -> vig
   assert.equal(elegirConceptoVigente(cand, null, 1, { esLegacy: true }).id, 6);
   assert.equal(elegirConceptoVigente(cand, null, 1, { esLegacy: false }).id, 1);
   assert.equal(elegirConceptoVigente(cand, null, 1).id, 1);
+});
+
+test('construirHistorialCiclos: inscripción renovada -> cada fila muestra el corte de su propio ciclo', () => {
+  // fecha_inscripcion ya fue movida al inicio del ciclo nuevo por la renovación.
+  const inscripcion = {
+    id: 1, estado: 'ACTIVO', tipo_inscripcion: 'REGULAR', fecha_inscripcion: d('2026-10-18'),
+    horarios_clases: null,
+    inscripciones_deudas_link: [
+      { fecha_inicio_ciclo: d('2026-10-18'), fecha_fin_ciclo: null, monto_asignado: 90, es_estimado: false, cuentas_por_cobrar: { id: 2, estado: 'PAGADA' } },
+      { fecha_inicio_ciclo: d('2026-09-18'), fecha_fin_ciclo: d('2026-10-17'), monto_asignado: 90, es_estimado: false, cuentas_por_cobrar: { id: 1, estado: 'PAGADA' } },
+    ],
+  };
+  const [abierto, cerrado] = construirHistorialCiclos([inscripcion]);
+
+  assert.equal(cerrado.numero_mes_ciclo, 1);
+  assert.deepEqual(cerrado.fecha_fin_ciclo, d('2026-10-17'));
+  assert.deepEqual(cerrado.fecha_corte_ciclo, d('2026-10-17'));
+  assert.equal(cerrado.es_vigente, false);
+  assert.equal(cerrado.estado_ciclo, 'CERRADO');
+
+  assert.equal(abierto.numero_mes_ciclo, 2);
+  assert.equal(abierto.fecha_fin_ciclo, null);
+  assert.deepEqual(abierto.fecha_corte_ciclo, d('2026-11-16'));
+  assert.equal(abierto.es_vigente, true);
+});
+
+test('finCicloEfectivo: ciclo abierto termina en inicio + 29 (día 1 = inicio)', () => {
+  assert.deepEqual(finCicloEfectivo(d('2026-10-18'), null), d('2026-11-16'));
+  assert.deepEqual(finCicloEfectivo(d('2026-10-18'), d('2026-10-20')), d('2026-10-20'));
 });
