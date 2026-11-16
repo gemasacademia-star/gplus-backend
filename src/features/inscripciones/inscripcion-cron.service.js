@@ -5,7 +5,7 @@ import { twilioProvider } from '../../shared/services/twilio.whatsapp.service.js
 import { emailService } from '../../shared/services/brevo.email.service.js';
 import { inscripcionService } from './inscripcion.service.js';
 import { merchService } from '../merch/merch.service.js';
-import { DIAS_CICLO, aFechaUTC, diaLimaAFechaUTC } from '../../shared/utils/ciclo.util.js';
+import { DIAS_CICLO, ULTIMO_DIA_CICLO, aFechaUTC, diaLimaAFechaUTC } from '../../shared/utils/ciclo.util.js';
 // 🎯 BL-001
 import { TIPO_INSCRIPCION, esIndividual, whereTipoInscripcion } from '../../shared/utils/tipo-inscripcion.util.js';
 import { DIAS_VENTANA_INDIVIDUAL } from '../../shared/utils/clase-fecha.util.js';
@@ -138,11 +138,12 @@ class InscripcionCronService {
           const diasTranscurridos = hoyLima.diff(fechaInicio, 'day');
 
           if (diasTranscurridos >= DIAS_CICLO) {
-            // 🚩 Cierre real del ciclo: día 30 exacto, no "hoy" (que puede traer tolerancia)
+            // 🚩 Se cierra al cumplir DIAS_CICLO, pero se guarda el ÚLTIMO día del
+            // ciclo (inicio + ULTIMO_DIA_CICLO), no "hoy" (que puede traer tolerancia)
             // 🔧 BL-011: a mediodía, para que el truncado a @db.Date no dependa
             // de que las 05:00Z caigan en el día correcto. DIAS_CICLO vive en
             // shared/utils/ciclo.util.js, que es la única definición del largo.
-            const fechaFinCicloReal = fechaInicio.add(DIAS_CICLO, 'day').hour(12).toDate();
+            const fechaFinCicloReal = fechaInicio.add(ULTIMO_DIA_CICLO, 'day').hour(12).toDate();
 
             await prisma.$transaction(async (tx) => {
               await tx.inscripciones.update({
@@ -248,7 +249,7 @@ class InscripcionCronService {
 
               // 🚩 BL-001: cerramos el ciclo del link. Antes este cron
               // finalizaba la inscripción pero dejaba fecha_fin_ciclo en null
-              // PARA SIEMPRE, y finCicloEfectivo() le derivaba inicio + 30d, así
+              // PARA SIEMPRE, y finCicloEfectivo() le derivaba inicio + 29d, así
               // que una clase suelta se reportaba como ciclo mensual abierto.
               // Mismo patrón que ya usa el VERDUGO y las finalizaciones
               // voluntarias.

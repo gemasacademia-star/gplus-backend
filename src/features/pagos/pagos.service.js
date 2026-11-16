@@ -325,7 +325,7 @@ export const pagosService = {
                   }
                   : {
                     // 🚩 REGULAR: fecha_fin_ciclo se queda en NULL = VIGENTE.
-                    // El +30 NO se escribe acá a propósito: lo deriva
+                    // El corte (+29) NO se escribe acá a propósito: lo deriva
                     // finCicloEfectivo() y lo cierra el cron VERDUGO contando
                     // desde fecha_inscripcion, que acabamos de mover. Escribirlo
                     // rompería es_vigente del historial (filaCiclo lo define como

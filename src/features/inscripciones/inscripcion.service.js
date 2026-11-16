@@ -396,7 +396,7 @@ export const inscripcionService = {
         // actual sigue corriendo unos días más), así que NO se corta el ciclo
         // viejo "el día antes" como hace generarRenovacionPaquete —eso le
         // robaría días al alumno—. Se le estampa su fin NATURAL
-        // (finCicloEfectivo = inicio + 30d, una fecha futura) y el ciclo nuevo
+        // (finCicloEfectivo = inicio + 29d, una fecha futura) y el ciclo nuevo
         // arranca al día siguiente. Así queda exactamente UN link con
         // fecha_fin_ciclo = null por inscripción, que es el invariante del que
         // dependen el VERDUGO, es_vigente de filaCiclo y la renovación.
@@ -1870,7 +1870,8 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
   const cuenta = link.cuentas_por_cobrar;
   const inicio = aFechaUTC(link.fecha_inicio_ciclo);
   const fin = aFechaUTC(link.fecha_fin_ciclo);
-  const corte = finCicloEfectivo(inscripcion.fecha_inscripcion, null);
+  // Fechas del PROPIO link: fecha_inscripcion se sobrescribe en cada renovación.
+  const corte = finCicloEfectivo(link.fecha_inicio_ciclo, link.fecha_fin_ciclo);
   const esVigente = link.fecha_fin_ciclo === null;
   const estadoCiclo = calcularEstadoCiclo({
     fechaFin: fin,
@@ -1884,7 +1885,7 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
 
     numero_mes_ciclo: numeroMesCiclo,
     fecha_inicio_ciclo: inicio,                 // ✅ dato real del link, normalizado en UTC
-    fecha_fin_ciclo: corte,                       // ✅ null si sigue vigente
+    fecha_fin_ciclo: fin,                       // ✅ null si sigue vigente
     // 🔧 BL-011: antes acá venía cuenta.fecha_vencimiento, que es el PLAZO DE
     // PAGO (hoy + 2 días), no el fin del ciclo. Ahora es el fin real.
     // El plazo de pago no se pierde: va en fecha_vencimiento_pago.
@@ -1902,7 +1903,7 @@ function filaCiclo(inscripcion, link, numeroMesCiclo) {
     sin_vigencia: inicio === null,              // sin fecha_inicio_ciclo en BD
     dias_ciclo: diasEntreUTC(inicio, corte),
     fecha_inicio_ciclo_label: formatFechaEs(inicio),
-    fecha_fin_ciclo_label: corte ? formatFechaEs(corte) : (estadoCiclo === 'VENCIDO' ? 'Vencido' : estadoCiclo === 'CERRADO' ? 'Sin fecha de cierre' : 'Vigente'),
+    fecha_fin_ciclo_label: fin ? formatFechaEs(fin) : (estadoCiclo === 'VENCIDO' ? 'Vencido' : estadoCiclo === 'CERRADO' ? 'Sin fecha de cierre' : 'Vigente'),
     fecha_corte_ciclo_label: formatFechaEs(corte),
     fecha_vencimiento_pago: cuenta?.fecha_vencimiento ?? null,
   };
@@ -1939,7 +1940,7 @@ function filaSinCuenta(inscripcion) {
 }
 
 // Aplana inscripciones -> filas de ciclo, numerando y ordenando bien.
-function construirHistorialCiclos(inscripciones) {
+export function construirHistorialCiclos(inscripciones) {
   const filas = [];
 
   for (const inscripcion of inscripciones) {

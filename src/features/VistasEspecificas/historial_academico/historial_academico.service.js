@@ -3,9 +3,8 @@ import { ApiError } from '../../../shared/utils/error.util.js';
 import { formatFechaEs } from '../../../shared/utils/date.util.js';
 // 🎯 BL-011: la vigencia del ciclo ahora vive en un solo lugar.
 import {
-  DIAS_CICLO,
   ESTADOS_VALIDOS_PARA_CICLO,
-  sumarDiasUTC,
+  finCicloEfectivo,
 } from '../../../shared/utils/ciclo.util.js';
 
 // 🔥 DAYJS + LIMA: solo para fechas de tipo Timestamp, donde el formateo en
@@ -45,8 +44,8 @@ const estaVencida = (fechaCorte) => {
   return fechaCorte.getTime() < Date.now();
 };
 
-// 🎯 BL-013 / BL-011: DIAS_CICLO (30) y sumarDiasUTC se movieron a
-// shared/utils/ciclo.util.js, que es ahora la única definición del cierre real
+// 🎯 BL-013 / BL-011: el cierre del ciclo (finCicloEfectivo, inicio + 29) vive
+// en shared/utils/ciclo.util.js, que es la única definición del cierre real
 // del ciclo. Ojo: NO es el mismo número que DIAS_VIGENCIA_INSCRIPCION (29),
 // que es la regla del badge de la tabla.
 
@@ -613,7 +612,7 @@ export const historialAcademicoService = {
         // Base: la definición de "vigente" de dashboard.service.js, pero a
         // propósito MÁS amplia — ver el filtro de abajo.
         // fecha_fin_ciclo es NULL mientras el ciclo está abierto, así que se
-        // deriva fecha_inicio_ciclo + 30d: el cierre real del cron VERDUGO.
+        // deriva con finCicloEfectivo (inicio + 29d), igual que el historial de ciclos.
         const cortesVigentes = activasGlobales
           .flatMap((i) => i.inscripciones_deudas_link || [])
           .filter((l) => {
@@ -627,7 +626,7 @@ export const historialAcademicoService = {
           })
           .map((l) => (l.fecha_fin_ciclo
             ? new Date(l.fecha_fin_ciclo).getTime()
-            : sumarDiasUTC(l.fecha_inicio_ciclo, DIAS_CICLO).getTime()));
+            : finCicloEfectivo(l.fecha_inicio_ciclo, null).getTime()));
 
         // Multi-sede: el corte más lejano = hasta cuándo está cubierto.
         const fechaCorte = cortesVigentes.length > 0

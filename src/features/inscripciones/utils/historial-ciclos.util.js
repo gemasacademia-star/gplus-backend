@@ -6,7 +6,7 @@ const ESTADOS_INSCRIPCION_TERMINALES = ['FINALIZADO', 'CANCELADO'];
 /**
  * Estado real de un ciclo.
  *  - CERRADO : tiene fecha_fin_ciclo, o su inscripción ya terminó (dato viejo sin cerrar).
- *  - VENCIDO : sigue abierto pero el corte (inicio + 30d) ya pasó; está en tolerancia
+ *  - VENCIDO : sigue abierto pero el corte (inicio + 29d) ya pasó; está en tolerancia
  *              hasta que el cron VERDUGO lo cierre.
  *  - VIGENTE : abierto y dentro de sus 30 días.
  * `hoy` y `corte` son medianoche UTC del día calendario.
