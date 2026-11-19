@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { ApiError } from '../../../shared/utils/error.util.js';
 import { VALID_ROLES } from '../../roles/roles.constants.js';
+import { quitarTildes } from '../../../shared/utils/username.util.js';
 
 export const registroLogic = {
   /**
@@ -53,8 +54,9 @@ export const registroLogic = {
    * Construye el nombre de usuario de fallback auto-generado: "nombre.apellido123"
    */
   generarFallbackUsername: (nombres, apellidos, id) => {
-    const primerNombre = nombres.split(' ')[0].toLowerCase();
-    const primerApellido = apellidos.split(' ')[0].toLowerCase();
+    // G-14: sin tildes ni ñ, así cumple /^[a-z0-9._]+$/ como un username manual.
+    const primerNombre = quitarTildes(nombres.split(' ')[0].toLowerCase());
+    const primerApellido = quitarTildes(apellidos.split(' ')[0].toLowerCase());
     return `${primerNombre}.${primerApellido}${id}`;
   },
 
