@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { ApiError } from '../../shared/utils/error.util.js';
 import { merchService } from '../merch/merch.service.js';
 import { armarDesgloseIngresos } from './desglose-ingresos.logic.js';
+import { repartirEnSoles } from '../../shared/utils/dinero.util.js';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 const prisma = new PrismaClient();
 
@@ -236,7 +237,11 @@ export const movimientosFinancierosService = {
             // sin importar el mes), así el monto del pago se reparte de forma consistente
             // sin importar en qué mes lo estés consultando. La suma de este monto a través
             // de TODOS los meses siempre da exactamente pago.monto_pagado, ni más ni menos.
-            const montoPorLink = Number(pago.monto_pagado) / todosLosLinks.length;
+            // G-17: sin decimales infinitos. Se reparte en soles enteros (en céntimos si el
+            // pago los trae) y el sobrante va a los links de menor id, igual que en el anual.
+            const idsAsc = todosLosLinks.map(l => l.id).sort((a, b) => a - b);
+            const partes = repartirEnSoles(pago.monto_pagado, idsAsc.length);
+            const montoDeLink = (link) => partes[idsAsc.indexOf(link.id)];
 
             // De esos links, solo nos interesan (mostramos) los que caen en ESTE mes.
             const linksDeEsteMes = todosLosLinks.filter(link => {
@@ -261,7 +266,7 @@ export const movimientosFinancierosService = {
                 reporte[sede].niveles[nivel].ingresos.push({
                     id: pago.id,
                     concepto: `PAGO - ${nivel} | ${fteAsignado} FTE`,
-                    monto: montoPorLink.toString(), // 🚩 FIX: ya no se divide por links.length del mes
+                    monto: montoDeLink(link).toString(), // 🚩 FIX: ya no se divide por links.length del mes
                     fecha: link.fecha_inicio_ciclo, // mostramos la fecha real del ciclo, no la fecha de pago
                     alumno: pago.cuentas_por_cobrar?.alumnos?.usuarios
                         ? `${pago.cuentas_por_cobrar.alumnos.usuarios.nombres} ${pago.cuentas_por_cobrar.alumnos.usuarios.apellidos}`
@@ -404,22 +409,31 @@ export const movimientosFinancierosService = {
         // (fecha_inicio_ciclo), no por fecha de pago — misma regla que
         // obtenerResumenMensual: el monto se reparte entre todos los
         // ciclos de la cuenta, no solo los del mes.
+        // G-17: mismo reparto que repartirEnSoles (dinero.util.js). n y rn se calculan
+        // sobre TODOS los links de la cuenta (antes de filtrar el año); la unidad es
+        // 1 sol (100 céntimos) si el pago es en soles enteros, si no 1 céntimo, y el
+        // sobrante va a los links de menor id.
         const filasPagos = await prisma.$queryRaw`
-            WITH links_totales AS (
-                SELECT cuenta_id, COUNT(*)::int AS total_links
+            WITH links AS (
+                SELECT id, cuenta_id, fecha_inicio_ciclo,
+                       COUNT(*) OVER (PARTITION BY cuenta_id)::bigint AS n,
+                       ROW_NUMBER() OVER (PARTITION BY cuenta_id ORDER BY id)::bigint AS rn
                 FROM inscripciones_deudas_link
-                GROUP BY cuenta_id
+            ),
+            partes AS (
+                SELECT idl.fecha_inicio_ciclo, idl.n, idl.rn,
+                       ROUND(p.monto_pagado * 100)::bigint AS c,
+                       CASE WHEN ROUND(p.monto_pagado * 100)::bigint % 100 = 0 THEN 100 ELSE 1 END AS u
+                FROM pagos p
+                JOIN links idl ON idl.cuenta_id = p.cuenta_id
+                WHERE p.estado_validacion = 'APROBADO'
+                  AND idl.fecha_inicio_ciclo BETWEEN ${fechaInicio} AND ${fechaFin}
             )
             SELECT
-                EXTRACT(MONTH FROM idl.fecha_inicio_ciclo)::int AS mes,
-                SUM(p.monto_pagado / lt.total_links) AS total
-            FROM pagos p
-            JOIN cuentas_por_cobrar cpc        ON cpc.id = p.cuenta_id
-            JOIN links_totales lt              ON lt.cuenta_id = cpc.id
-            JOIN inscripciones_deudas_link idl ON idl.cuenta_id = cpc.id
-            WHERE p.estado_validacion = 'APROBADO'
-              AND idl.fecha_inicio_ciclo BETWEEN ${fechaInicio} AND ${fechaFin}
-            GROUP BY EXTRACT(MONTH FROM idl.fecha_inicio_ciclo)
+                EXTRACT(MONTH FROM fecha_inicio_ciclo)::int AS mes,
+                SUM(((c / u) / n + CASE WHEN rn <= (c / u) % n THEN 1 ELSE 0 END) * u) / 100.0 AS total
+            FROM partes
+            GROUP BY EXTRACT(MONTH FROM fecha_inicio_ciclo)
             ORDER BY mes;
         `;
  

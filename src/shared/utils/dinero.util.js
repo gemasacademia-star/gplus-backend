@@ -64,6 +64,34 @@ export function repartirMonto(total, n) {
   return Array.from({ length: n }, (_, i) => aMonto(base + (i < residuo ? 1 : 0)));
 }
 
+/**
+ * G-17: reparto de un pago entre sus links para el Balance. Si el total es en
+ * soles enteros se reparte en SOLES enteros (los sobrantes a las primeras
+ * partes); si trae céntimos, se reparte en céntimos con repartirMonto.
+ *
+ *   repartirEnSoles(230, 3)    -> [77, 77, 76]
+ *   repartirEnSoles(180, 2)    -> [90, 90]
+ *   repartirEnSoles(100.5, 2)  -> [50.25, 50.25]
+ *
+ * La suma de las partes es siempre exactamente redondear2(total).
+ * El resumen anual (SQL) replica esta misma regla: si se cambia aquí, cambiarla allí.
+ */
+export function repartirEnSoles(total, n) {
+  const centimos = aCentimos(total);
+  if (centimos % 100 !== 0) return repartirMonto(total, n);
+
+  // Mismas validaciones (n entero > 0, total >= 0) que repartirMonto.
+  repartirMonto(0, n);
+  if (centimos < 0) {
+    throw new ApiError(`No se puede repartir un monto negativo: ${total}`, 400);
+  }
+
+  const soles = centimos / 100;
+  const base = Math.floor(soles / n);
+  const residuo = soles - base * n; // 0 .. n-1
+  return Array.from({ length: n }, (_, i) => base + (i < residuo ? 1 : 0));
+}
+
 /** Suma una lista de montos sin arrastrar error de float. */
 export function sumarMontos(montos) {
   return aMonto(montos.reduce((acc, m) => acc + aCentimos(m), 0));
