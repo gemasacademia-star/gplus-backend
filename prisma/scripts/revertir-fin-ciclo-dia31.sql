@@ -1,7 +1,8 @@
 -- Revierte prisma/scripts/corregir-fin-ciclo-dia31.sql: devuelve fecha_fin_ciclo al
 -- valor guardado en bk_fin_ciclo_dia31 y borra esa tabla, para poder volver a aplicar.
--- Solo toca filas que siguen como las dejó la corrección (fin = inicio + 29); si
--- alguna cambió después, aborta todo (ROLLBACK) y no restaura nada.
+-- Solo toca filas que siguen como las dejó la corrección (fin = fin anterior - 1, que
+-- también cubre los ciclos de 31 días); si alguna cambió después, aborta todo
+-- (ROLLBACK) y no restaura nada.
 --
 -- Uso: psql "$DATABASE_URL" -f prisma/scripts/revertir-fin-ciclo-dia31.sql
 
@@ -11,7 +12,7 @@ UPDATE inscripciones_deudas_link l
 SET fecha_fin_ciclo = b.fecha_fin_ciclo_anterior
 FROM bk_fin_ciclo_dia31 b
 WHERE l.id = b.id
-  AND l.fecha_fin_ciclo = l.fecha_inicio_ciclo + 29;
+  AND l.fecha_fin_ciclo = b.fecha_fin_ciclo_anterior - 1;
 
 DO $$
 DECLARE
