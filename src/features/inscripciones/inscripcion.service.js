@@ -7,6 +7,7 @@ import { asistenciaService } from '../asistencia/asistencia.service.js';
 import { ApiError } from '../../shared/utils/error.util.js';
 import { CuentasPorCobrarService } from '../cuenta_por_cobrar/cuentas_por_cobrar.service.js';
 import { pagosService } from '../pagos/pagos.service.js';
+import { enviarAValidacionSiMontoCero } from '../pagos/utils/pago-cero.util.js';
 import { merchService } from '../merch/merch.service.js';
 import { quitarDetalleMerch } from '../merch/logic/merch.logic.js';
 import { formatFechaEs } from '../../shared/utils/date.util.js';
@@ -225,6 +226,10 @@ export const inscripcionService = {
         });
         montoActualizado = montoFinal;
 
+        // 🎁 G-15: con un beneficio del 100% no hay nada que pagar; el pago de S/ 0
+        // lleva la reserva a la bandeja del admin (si no, el cron de zombies la borraba).
+        const pagoCero = await enviarAValidacionSiMontoCero(tx, nuevaCuenta.id);
+
         // 🔔 PASO 8: NOTIFICACIÓN
         await tx.notificaciones.create({
           data: {
@@ -241,6 +246,9 @@ export const inscripcionService = {
           total_a_pagar: montoActualizado,
           cuenta_id: nuevaCuenta.id,
           inscripciones: inscripcionesCreadas,
+          // G-15: POR_VALIDAR si el beneficio dejó la cuenta en S/ 0 (pago_cero_id es su pago).
+          estado: pagoCero ? 'POR_VALIDAR' : 'PENDIENTE_PAGO',
+          pago_cero_id: pagoCero?.id ?? null,
           // Llaves nuevas (aditivas): solo informan el merch del cobro combinado.
           total_merch: merchCombo.total,
           merch: merchCombo.lineas

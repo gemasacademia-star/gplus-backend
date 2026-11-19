@@ -3,6 +3,7 @@ import { ApiError } from '../../shared/utils/error.util.js';
 // 💰 BL-002: el reparto del puente vive en un solo sitio.
 import { redondear2 } from '../../shared/utils/dinero.util.js';
 import { sincronizarPuenteDeuda } from '../../shared/utils/deuda-puente.util.js';
+import { enviarAValidacionSiMontoCero, deshacerPagoCeroPendiente } from '../pagos/utils/pago-cero.util.js';
 
 export const DescuentosAplicadosService = {
  async aplicar({ cuenta_id, tipo_beneficio_id, admin_id, motivo }) {
@@ -77,9 +78,14 @@ export const DescuentosAplicadosService = {
       // de 3 clases dejaba 113.33 x3 = 339.99 contra un monto_final de 340.00).
       await sincronizarPuenteDeuda(tx, cuenta_id, nuevoMonto);
 
+      // 🎁 G-15: un descuento del 100% deja la cuenta en S/ 0; el pago de S/ 0 lleva
+      // las inscripciones a la bandeja del admin en vez de dejarlas sin activar.
+      const pagoCero = await enviarAValidacionSiMontoCero(tx, cuenta_id);
+
       return {
         descuentoFinal,
         descuento: nuevoDescuento,
+        pago_cero_id: pagoCero?.id ?? null,
       };
     });
   },
@@ -131,6 +137,12 @@ export const DescuentosAplicadosService = {
       // 🔥 PASO ADICIONAL: RE-EQUILIBRAR EL PUENTE (Al restaurar precio original)
       // 💰 BL-002: mismo reparto exacto que en aplicar().
       await sincronizarPuenteDeuda(tx, descuento.cuenta_id, nuevaDeuda);
+
+      // 🎁 G-15: la cuenta vuelve a tener saldo, así que el pago de S/ 0 que esperaba
+      // validación ya no corresponde: se borra y las inscripciones vuelven a PENDIENTE_PAGO.
+      if (nuevaDeuda > 0.01) {
+        await deshacerPagoCeroPendiente(tx, descuento.cuenta_id);
+      }
 
       return await tx.descuentos_aplicados.delete({
         where: { id: descuento_id },

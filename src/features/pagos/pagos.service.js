@@ -20,6 +20,8 @@ import {
   validarFechaNoFeriado,
 } from '../inscripciones/validators/inscripcion.validator.js';
 import { ApiError } from '../../shared/utils/error.util.js';
+import { esPagoCero } from './utils/pago-cero.util.js';
+import { restaurarBeneficiosConsumidos } from '../inscripciones/utils/beneficios.util.js';
 
 export const pagosService = {
   // 1. REGISTRAR EL PAGO (Integrado con Cloudinary 🚀)
@@ -412,6 +414,18 @@ export const pagosService = {
           await tx.inscripciones.deleteMany({
             where: { id: { in: idsInsc }, estado: 'POR_VALIDAR' }
           });
+
+          // 🎁 G-15: rechazar el pago de S/ 0 de un beneficio del 100% devuelve el
+          // beneficio a la cola (mismo patrón que eliminarPaqueteCompleto: restaurar y
+          // borrar el descuento, para que no se restaure dos veces).
+          if (esPagoCero(pago)) {
+            const descuentos = await tx.descuentos_aplicados.findMany({
+              where: { cuenta_id: pago.cuenta_id },
+              select: { tipo_beneficio_id: true },
+            });
+            await restaurarBeneficiosConsumidos(tx, pago.cuentas_por_cobrar.alumno_id, descuentos);
+            await tx.descuentos_aplicados.deleteMany({ where: { cuenta_id: pago.cuenta_id } });
+          }
         }
       }
 

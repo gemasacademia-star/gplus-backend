@@ -204,7 +204,8 @@ export const renovacionHistoricaService = {
       inscripcion_ids: r.inscripciones.map((i) => i.id),
       monto_final: r.total_a_pagar,
       fecha_inicio: fechaInicio,
-      estado: 'PENDIENTE_PAGO',
+      // G-15: POR_VALIDAR cuando un beneficio del 100% dejó la cuenta en S/ 0.
+      estado: r.estado,
     };
   },
 };
