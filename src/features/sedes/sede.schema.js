@@ -109,4 +109,14 @@ export const sedeSchema = {
       .transform((val) => parseInt(val, 10))
       .default('10'),
   }),
+
+  sedeDetalleQuerySchema: z.object({
+    incluir_inactivos: z
+      .preprocess((val) => {
+        if (val === 'true' || val === true) return true;
+        if (val === 'false' || val === false || val === undefined || val === '') return false;
+        return val;
+      }, z.boolean())
+      .default(false),
+  }),
 };
