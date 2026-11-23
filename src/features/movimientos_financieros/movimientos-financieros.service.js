@@ -2,9 +2,67 @@ import { PrismaClient } from '@prisma/client';
 import { ApiError } from '../../shared/utils/error.util.js';
 import { merchService } from '../merch/merch.service.js';
 import { armarDesgloseIngresos } from './desglose-ingresos.logic.js';
-import { repartirEnSoles } from '../../shared/utils/dinero.util.js';
+import { aCentimos, aMonto } from '../../shared/utils/dinero.util.js';
+import { repartirPagoEntreLinks } from './reparto-balance.logic.js';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 const prisma = new PrismaClient();
+
+// Pagos del Balance: aprobados con al menos un link cuyo ciclo cae en el rango. Se traen
+// TODOS los links de la cuenta (sin filtrar por mes) para que el reparto sea el mismo en
+// cualquier mes que se consulte; la suma a través de los meses da exactamente el pago.
+const cargarPagosBalance = (fechaInicio, fechaFin) => Promise.all([
+    prisma.pagos.findMany({
+        where: {
+            estado_validacion: 'APROBADO',
+            cuentas_por_cobrar: {
+                inscripciones_deudas_link: {
+                    some: { fecha_inicio_ciclo: { gte: fechaInicio, lte: fechaFin } }
+                }
+            }
+        },
+        include: {
+            cuentas_por_cobrar: {
+                include: {
+                    alumnos: { include: { usuarios: true } },
+                    catalogo_conceptos: true,
+                    inscripciones_deudas_link: {
+                        include: {
+                            inscripciones: {
+                                include: {
+                                    horarios_clases: {
+                                        include: {
+                                            canchas: { include: { sedes: true } },
+                                            niveles_entrenamiento: true
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        orderBy: { id: 'desc' }
+                    }
+                }
+            }
+        }
+    }),
+    prisma.catalogo_conceptos.findMany({ where: { activo: true }, orderBy: { id: 'asc' } })
+]);
+
+// G-17 v2: link id -> monto del pago que le toca (reparto por sede según el catálogo).
+const montosPorLink = (pago, catalogo) => repartirPagoEntreLinks(
+    pago,
+    pago.cuentas_por_cobrar.inscripciones_deudas_link.map(l => ({
+        id: l.id,
+        sedeId: l.inscripciones?.horarios_clases?.canchas?.sede_id ?? null
+    })),
+    catalogo,
+    pago.cuentas_por_cobrar.catalogo_conceptos
+);
+
+// Año y mes (1-12) en que el Balance cuenta un ciclo. Mensual y anual usan esta misma función.
+const mesDelCiclo = (fecha) => {
+    const f = new Date(fecha);
+    return { anio: f.getFullYear(), mes: f.getMonth() + 1 };
+};
 
 // Las filas INGRESO_MERCH / INGRESO_MATRICULA las genera la validación de un pago:
 // editarlas o borrarlas a mano las desalinearía del pago que las originó.
@@ -182,49 +240,7 @@ export const movimientosFinancierosService = {
         // Filtramos por fecha_inicio_ciclo del LINK (fecha real de inicio de clases),
         // no por fecha_inscripcion_original de la inscripción (que se pisa en cada renovación).
         // Esto decide SI el pago tiene actividad este mes.
-        const ingresos = await prisma.pagos.findMany({
-            where: {
-                estado_validacion: 'APROBADO',
-                cuentas_por_cobrar: {
-                    inscripciones_deudas_link: {
-                        some: {
-                            fecha_inicio_ciclo: { gte: fechaInicio, lte: fechaFin }
-                        }
-                    }
-                }
-            },
-            include: {
-                cuentas_por_cobrar: {
-                    include: {
-                        alumnos: { include: { usuarios: true } },
-                        // 🚩 FIX: traemos TODOS los links de la cuenta, SIN filtrar por mes.
-                        // Antes solo se traían los del mes consultado, lo que hacía que el
-                        // divisor del split (links.length) fuera distinto según el mes que
-                        // consultes -> un mismo pago se contaba completo en cada mes donde
-                        // tuviera al menos un link, duplicando ingresos cuando una cuenta
-                        // tiene ciclos en meses distintos (confirmado con datos reales:
-                        // varias cuentas con links repartidos en 2 meses).
-                        inscripciones_deudas_link: {
-                            include: {
-                                inscripciones: {
-                                    include: {
-                                        horarios_clases: {
-                                            include: {
-                                                canchas: { include: { sedes: true } },
-                                                niveles_entrenamiento: true
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            orderBy: {
-                                id: "desc",
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        const [ingresos, catalogo] = await cargarPagosBalance(fechaInicio, fechaFin);
 
         const reporte = {};
 
@@ -233,21 +249,15 @@ export const movimientosFinancierosService = {
             const todosLosLinks = pago.cuentas_por_cobrar?.inscripciones_deudas_link || [];
             if (todosLosLinks.length === 0) return;
 
-            // 🚩 FIX: el divisor usa el TOTAL de links de la cuenta (todos sus ciclos,
-            // sin importar el mes), así el monto del pago se reparte de forma consistente
-            // sin importar en qué mes lo estés consultando. La suma de este monto a través
-            // de TODOS los meses siempre da exactamente pago.monto_pagado, ni más ni menos.
-            // G-17: sin decimales infinitos. Se reparte en soles enteros (en céntimos si el
-            // pago los trae) y el sobrante va a los links de menor id, igual que en el anual.
-            const idsAsc = todosLosLinks.map(l => l.id).sort((a, b) => a - b);
-            const partes = repartirEnSoles(pago.monto_pagado, idsAsc.length);
-            const montoDeLink = (link) => partes[idsAsc.indexOf(link.id)];
+            // G-17 v2: reparto por sede según el plan del catálogo (reparto-balance.logic.js).
+            const montos = montosPorLink(pago, catalogo);
+            const montoDeLink = (link) => montos.get(link.id);
 
             // De esos links, solo nos interesan (mostramos) los que caen en ESTE mes.
             const linksDeEsteMes = todosLosLinks.filter(link => {
                 if (!link.fecha_inicio_ciclo) return false;
-                const f = new Date(link.fecha_inicio_ciclo);
-                return f >= fechaInicio && f <= fechaFin;
+                const m = mesDelCiclo(link.fecha_inicio_ciclo);
+                return m.anio === anioInt && m.mes === mesInt;
             });
             if (linksDeEsteMes.length === 0) return; // seguridad: si no hay link de este mes, no se cuenta
 
@@ -405,38 +415,20 @@ export const movimientosFinancierosService = {
         const fechaInicio = new Date(anioInt, 0, 1);
         const fechaFin = new Date(anioInt, 11, 31, 23, 59, 59);
  
-        // Ingresos automáticos (pagos), agrupados por mes del CICLO
-        // (fecha_inicio_ciclo), no por fecha de pago — misma regla que
-        // obtenerResumenMensual: el monto se reparte entre todos los
-        // ciclos de la cuenta, no solo los del mes.
-        // G-17: mismo reparto que repartirEnSoles (dinero.util.js). n y rn se calculan
-        // sobre TODOS los links de la cuenta (antes de filtrar el año); la unidad es
-        // 1 sol (100 céntimos) si el pago es en soles enteros, si no 1 céntimo, y el
-        // sobrante va a los links de menor id.
-        const filasPagos = await prisma.$queryRaw`
-            WITH links AS (
-                SELECT id, cuenta_id, fecha_inicio_ciclo,
-                       COUNT(*) OVER (PARTITION BY cuenta_id)::bigint AS n,
-                       ROW_NUMBER() OVER (PARTITION BY cuenta_id ORDER BY id)::bigint AS rn
-                FROM inscripciones_deudas_link
-            ),
-            partes AS (
-                SELECT idl.fecha_inicio_ciclo, idl.n, idl.rn,
-                       ROUND(p.monto_pagado * 100)::bigint AS c,
-                       CASE WHEN ROUND(p.monto_pagado * 100)::bigint % 100 = 0 THEN 100 ELSE 1 END AS u
-                FROM pagos p
-                JOIN links idl ON idl.cuenta_id = p.cuenta_id
-                WHERE p.estado_validacion = 'APROBADO'
-                  AND idl.fecha_inicio_ciclo BETWEEN ${fechaInicio} AND ${fechaFin}
-            )
-            SELECT
-                EXTRACT(MONTH FROM fecha_inicio_ciclo)::int AS mes,
-                SUM(((c / u) / n + CASE WHEN rn <= (c / u) % n THEN 1 ELSE 0 END) * u) / 100.0 AS total
-            FROM partes
-            GROUP BY EXTRACT(MONTH FROM fecha_inicio_ciclo)
-            ORDER BY mes;
-        `;
- 
+        // Ingresos automáticos (pagos), agrupados por mes del CICLO (fecha_inicio_ciclo),
+        // no por fecha de pago. G-17 v2: mismas funciones que obtenerResumenMensual
+        // (cargarPagosBalance, montosPorLink, mesDelCiclo) para que ambos cuadren.
+        const [pagos, catalogo] = await cargarPagosBalance(fechaInicio, fechaFin);
+        const centimosPorMes = Array(12).fill(0);
+        pagos.forEach(pago => {
+            const montos = montosPorLink(pago, catalogo);
+            pago.cuentas_por_cobrar.inscripciones_deudas_link.forEach(link => {
+                if (!link.fecha_inicio_ciclo) return;
+                const m = mesDelCiclo(link.fecha_inicio_ciclo);
+                if (m.anio === anioInt) centimosPorMes[m.mes - 1] += aCentimos(montos.get(link.id));
+            });
+        });
+
         // Ventas sueltas de merch (sin link de matrícula), agrupadas por mes de pago
         const filasMerch = await prisma.$queryRaw`
             SELECT
@@ -476,8 +468,8 @@ export const movimientosFinancierosService = {
             balance: 0             // totalIngresos - egresos
         }));
  
-        filasPagos.forEach(fila => {
-            meses[Number(fila.mes) - 1].ingresosPagos = Number(fila.total);
+        centimosPorMes.forEach((c, i) => {
+            meses[i].ingresosPagos = aMonto(c);
         });
  
         filasMerch.forEach(fila => {
