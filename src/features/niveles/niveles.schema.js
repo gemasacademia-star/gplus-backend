@@ -10,7 +10,7 @@ export const nivelesSchema = {
     descripcion: z
       .string()
       .trim()
-      .max(200, 'La descripción no puede exceder 200 caracteres')
+      .max(500, 'La descripción no puede exceder 500 caracteres')
       .nullable()
       .optional(),
   }),
@@ -18,7 +18,7 @@ export const nivelesSchema = {
   updateNivelSchema: z
     .object({
       nombre: z.string().trim().min(3).max(50).optional(),
-      descripcion: z.string().trim().max(200).nullable().optional(),
+      descripcion: z.string().trim().max(500).nullable().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
       message: 'Debe proporcionar al menos un campo para actualizar',

@@ -65,8 +65,40 @@ async function main() {
     await prisma.tipos_documento.upsert({ where: { id }, update: {}, create: { id, descripcion } });
   }
   const metodo = {};
-  for (const nombre of ['YAPE', 'PLIN', 'TRANSFERENCIA', 'EFECTIVO']) {
-    metodo[nombre] = await prisma.metodos_pago.upsert({ where: { nombre }, update: {}, create: { nombre, activo: true } });
+  const metodoDefs = [
+    {
+      nombre: 'YAPE',
+      titular: 'Academia Gema Voley S.A.C.',
+      numero_telefono: '999 888 777',
+      detalle_instrucciones: 'Yapea al número indicado y adjunta la captura con el código de operación.',
+    },
+    {
+      nombre: 'PLIN',
+      titular: 'Academia Gema Voley S.A.C.',
+      numero_telefono: '999 888 777',
+      detalle_instrucciones: 'Plinea al número indicado y adjunta la captura del comprobante.',
+    },
+    {
+      nombre: 'TRANSFERENCIA',
+      titular: 'Academia Gema Voley S.A.C.',
+      banco: 'BCP',
+      numero_cuenta: '193-12345678-0-12',
+      cci: '002-193-001234567812-15',
+      detalle_instrucciones: 'Realiza la transferencia a la cuenta corriente BCP y adjunta el voucher.',
+    },
+    {
+      nombre: 'EFECTIVO',
+      titular: 'Recepción Sede Central',
+      detalle_instrucciones: 'Acércate a recepción en tu sede para cancelar en efectivo antes de iniciar tu clase.',
+    },
+  ];
+  for (const def of metodoDefs) {
+    const { nombre, ...detalles } = def;
+    metodo[nombre] = await prisma.metodos_pago.upsert({
+      where: { nombre },
+      update: detalles,
+      create: { nombre, activo: true, ...detalles },
+    });
   }
   for (const [clave, valor, descripcion] of [
     ['DIAS_TOLERANCIA_PAGO', '3', 'Días extra para regularizar pago'],
@@ -110,9 +142,26 @@ async function main() {
   const canchaA = await findOrCreate('canchas', { sede_id: sedeCentral.id, nombre: 'Cancha A (Principal)' }, { descripcion: 'Piso flotante profesional' });
   const canchaB = await findOrCreate('canchas', { sede_id: sedeCentral.id, nombre: 'Cancha B' }, { descripcion: 'Cancha auxiliar' });
   const canchaN = await findOrCreate('canchas', { sede_id: sedeNorte.id, nombre: 'Cancha Norte 1' }, { descripcion: 'Losa techada' });
-  const nivelFormativo = await findOrCreate('niveles_entrenamiento', { nombre: 'Formativo' }, { precio_referencial: 150 });
-  const nivelIntermedio = await findOrCreate('niveles_entrenamiento', { nombre: 'Intermedio' }, { precio_referencial: 280 });
-  const nivelAvanzado = await findOrCreate('niveles_entrenamiento', { nombre: 'Avanzado' }, { precio_referencial: 400 });
+  const nivelDefs = [
+    { nombre: 'Básico', precio_referencial: 150, descripcion: 'Introducción al vóley: postura, desplazamiento, recepción y saque básico.' },
+    { nombre: 'Pre Intermedio', precio_referencial: 220, descripcion: 'Consolidación de fundamentos técnicos y primeras rotaciones en cancha.' },
+    { nombre: 'Formativo', precio_referencial: 150, descripcion: 'Formación integral de fundamentos técnicos, coordinación y trabajo en equipo.' },
+    { nombre: 'Intermedio', precio_referencial: 280, descripcion: 'Sistemas tácticos de juego, defensa, armado y remate en situaciones reales.' },
+    { nombre: 'Avanzado', precio_referencial: 400, descripcion: 'Alto rendimiento, lectura táctica, especialización por posición y competencia.' },
+  ];
+  const nivelesPorNombre = {};
+  for (const nd of nivelDefs) {
+    const existente = await prisma.niveles_entrenamiento.findFirst({ where: { nombre: nd.nombre } });
+    nivelesPorNombre[nd.nombre] = existente
+      ? await prisma.niveles_entrenamiento.update({
+          where: { id: existente.id },
+          data: { descripcion: nd.descripcion },
+        })
+      : await prisma.niveles_entrenamiento.create({ data: nd });
+  }
+  const nivelFormativo = nivelesPorNombre['Formativo'];
+  const nivelIntermedio = nivelesPorNombre['Intermedio'];
+  const nivelAvanzado = nivelesPorNombre['Avanzado'];
 
   // ---------- staff ----------
   const admin = await crearUsuario({ username: 'admin.demo', rol: rol.Administrador, nombres: 'Ana', apellidos: 'Administradora', doc: '70000001', telefono: '900000001', genero: 'F' }, hash);

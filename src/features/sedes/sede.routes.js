@@ -13,9 +13,24 @@ const router = Router();
 
 router.get('/', validateQuery(sedeSchema.sedeQuerySchema), sedeController.getAllSedes);
 router.get(
+  '/detalle',
+  authenticate,
+  authorize('Administrador', 'Coordinador'),
+  validateQuery(sedeSchema.sedeDetalleQuerySchema),
+  sedeController.getAllSedesDetalle
+);
+router.get(
   '/canchas/conteo',
   validateQuery(sedeSchema.sedeQuerySchema),
   sedeController.getCanchaForSedeCount
+);
+router.get(
+  '/:id/detalle',
+  authenticate,
+  authorize('Administrador', 'Coordinador'),
+  validateParams(sedeSchema.sedeIdParamSchema),
+  validateQuery(sedeSchema.sedeDetalleQuerySchema),
+  sedeController.getSedeDetalle
 );
 router.get('/:id', validateParams(sedeSchema.sedeIdParamSchema), sedeController.getSedeById);
 

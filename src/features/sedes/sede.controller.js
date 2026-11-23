@@ -79,4 +79,20 @@ export const sedeController = {
       data: ocupacion
     });
   }),
+
+  getAllSedesDetalle: catchAsync(async (req, res) => {
+    const detalle = await sedeService.getAllSedesDetalle(req.query);
+    return apiResponse.success(res, {
+      message: 'Detalle de sedes obtenido exitosamente',
+      data: detalle,
+    });
+  }),
+
+  getSedeDetalle: catchAsync(async (req, res) => {
+    const detalle = await sedeService.getSedeDetalle(req.params.id, req.query);
+    return apiResponse.success(res, {
+      message: 'Detalle de sede obtenido exitosamente',
+      data: detalle,
+    });
+  }),
 };

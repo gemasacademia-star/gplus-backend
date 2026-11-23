@@ -216,6 +216,12 @@ model metodos_pago {
   id                      Int                       @id @default(autoincrement())
   nombre                  String                    @unique @db.VarChar(50)
   activo                  Boolean?                  @default(true)
+  titular                 String?                   @db.VarChar(150)
+  numero_telefono         String?                   @db.VarChar(30)
+  numero_cuenta           String?                   @db.VarChar(50)
+  cci                     String?                   @db.VarChar(50)
+  banco                   String?                   @db.VarChar(80)
+  detalle_instrucciones   String?                   @db.Text
   pagos                   pagos[]
   movimientos_financieros movimientos_financieros[]
 }
@@ -224,6 +230,7 @@ model niveles_entrenamiento {
   id                 Int               @id @default(autoincrement())
   nombre             String            @db.VarChar(50)
   precio_referencial Decimal?          @db.Decimal(10, 2)
+  descripcion        String?           @db.Text
   horarios_clases    horarios_clases[]
 }
 
