@@ -7,6 +7,7 @@ import { JWT_SECRET } from '../../config/secret.config.js';
 import { emailService } from '../../shared/services/brevo.email.service.js';
 import { authLogic } from './logic/auth.logic.js';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { buscarUsuarioPorUsername } from '../../shared/utils/username.util.js';
 
 export const authService = {
   /**
@@ -20,22 +21,20 @@ export const authService = {
   login: async (loginData) => {
     const { username, password } = loginData;
 
-    const usuario = await prisma.usuarios.findUnique({
-      where: { username },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        nombres: true,
-        apellidos: true,
-        activo: true,
-        rol_id: true,
-        credenciales_usuario: {
-          select: { hash_contrasena: true, bloqueado: true },
-        },
-        roles: { select: { nombre: true } },
-        alumnos: { select: { usuario_id: true } },
+    // G-14: exacto o, si no hay, ignorando tildes y ñ ("sanchez" encuentra "sánchez").
+    const usuario = await buscarUsuarioPorUsername(prisma, username, {
+      id: true,
+      username: true,
+      email: true,
+      nombres: true,
+      apellidos: true,
+      activo: true,
+      rol_id: true,
+      credenciales_usuario: {
+        select: { hash_contrasena: true, bloqueado: true },
       },
+      roles: { select: { nombre: true } },
+      alumnos: { select: { usuario_id: true } },
     });
 
     if (!usuario) {
@@ -306,9 +305,10 @@ export const authService = {
    * @throws {ApiError} 404 si el usuario no existe o no tiene correo electrónico asociado.
    */
   forgotPassword: async (username) => {
-    const user = await prisma.usuarios.findUnique({
-      where: { username },
-      select: { id: true, email: true, nombres: true },
+    const user = await buscarUsuarioPorUsername(prisma, username, {
+      id: true,
+      email: true,
+      nombres: true,
     });
 
     if (!user?.email) {

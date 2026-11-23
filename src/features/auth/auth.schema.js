@@ -1,17 +1,22 @@
 import z from 'zod';
 
+// G-14: algunos teclados envían "á" descompuesta (a + U+0301); en BD está en NFC.
+const nfc = (schema) => z.preprocess((v) => (typeof v === 'string' ? v.normalize('NFC') : v), schema);
+
 export const authSchema = {
   loginSchema: z.object({
-    username: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .min(3, 'El nombre de usuario debe tener al menos 3 caracteres')
-      .max(50, 'El nombre de usuario no puede exceder los 50 caracteres')
-      .regex(
-        /^[a-z0-9._áéíóúüñ]+$/,
-        'El username solo permite letras, números, puntos y guiones bajos'
-      ),
+    username: nfc(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .min(3, 'El nombre de usuario debe tener al menos 3 caracteres')
+        .max(50, 'El nombre de usuario no puede exceder los 50 caracteres')
+        .regex(
+          /^[a-z0-9._áéíóúüñ]+$/,
+          'El username solo permite letras, números, puntos y guiones bajos'
+        )
+    ),
     password: z.string().min(1, 'La contraseña es obligatoria'),
   }),
 
@@ -20,7 +25,7 @@ export const authSchema = {
   }),
 
   forgotPasswordSchema: z.object({
-    username: z.string().trim().toLowerCase().min(3).max(50),
+    username: nfc(z.string().trim().toLowerCase().min(3).max(50)),
   }),
 
   resetPasswordSchema: z.object({

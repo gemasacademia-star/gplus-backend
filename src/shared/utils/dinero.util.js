@@ -64,6 +64,54 @@ export function repartirMonto(total, n) {
   return Array.from({ length: n }, (_, i) => aMonto(base + (i < residuo ? 1 : 0)));
 }
 
+/**
+ * G-17 v2: reparte `total` en proporción a `pesos` por mayor residuo. La unidad
+ * es 1 sol si el total es en soles enteros, si no 1 céntimo. Los empates de
+ * residuo van al índice menor. La suma es siempre exactamente redondear2(total).
+ *
+ *   repartirProporcional(230, [150, 80]) -> [150, 80]
+ *   repartirProporcional(115, [150, 80]) -> [75, 40]
+ *   repartirProporcional(230, [1, 1, 1]) -> [77, 77, 76]
+ */
+export function repartirProporcional(total, pesos) {
+  // Mismas validaciones (n entero > 0, total >= 0) que repartirMonto.
+  repartirMonto(0, pesos?.length);
+  const centimos = aCentimos(total);
+  if (centimos < 0) {
+    throw new ApiError(`No se puede repartir un monto negativo: ${total}`, 400);
+  }
+  const ws = pesos.map((p) => aCentimos(p));
+  const suma = ws.reduce((a, w) => a + w, 0);
+  if (ws.some((w) => w < 0) || suma <= 0) {
+    throw new ApiError(`Pesos inválidos para repartir: ${pesos}`, 400);
+  }
+
+  const u = centimos % 100 === 0 ? 100 : 1;
+  const unidades = centimos / u;
+  const base = ws.map((w) => Math.floor((unidades * w) / suma));
+  let sobrante = unidades - base.reduce((a, b) => a + b, 0);
+  const orden = ws
+    .map((w, i) => ({ i, resto: (unidades * w) % suma }))
+    .sort((a, b) => b.resto - a.resto || a.i - b.i);
+  for (const { i } of orden) {
+    if (sobrante-- <= 0) break;
+    base[i] += 1;
+  }
+  return base.map((b) => aMonto(b * u));
+}
+
+/**
+ * G-17: reparto en partes iguales para el Balance (soles enteros si el total los
+ * trae, si no céntimos; sobrante a las primeras partes).
+ *
+ *   repartirEnSoles(230, 3)    -> [77, 77, 76]
+ *   repartirEnSoles(100.5, 2)  -> [50.25, 50.25]
+ */
+export function repartirEnSoles(total, n) {
+  repartirMonto(0, n);
+  return repartirProporcional(total, Array(n).fill(1));
+}
+
 /** Suma una lista de montos sin arrastrar error de float. */
 export function sumarMontos(montos) {
   return aMonto(montos.reduce((acc, m) => acc + aCentimos(m), 0));
