@@ -3,20 +3,27 @@ import { ApiError } from '../../shared/utils/error.util.js';
 import { merchService } from '../merch/merch.service.js';
 import { armarDesgloseIngresos } from './desglose-ingresos.logic.js';
 import { aCentimos, aMonto } from '../../shared/utils/dinero.util.js';
-import { repartirPagoEntreLinks } from './reparto-balance.logic.js';
+import { repartirPagoEntreLinks, mesDelCiclo } from './reparto-balance.logic.js';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 const prisma = new PrismaClient();
 
 // Pagos del Balance: aprobados con al menos un link cuyo ciclo cae en el rango. Se traen
 // TODOS los links de la cuenta (sin filtrar por mes) para que el reparto sea el mismo en
 // cualquier mes que se consulte; la suma a través de los meses da exactamente el pago.
-const cargarPagosBalance = (fechaInicio, fechaFin) => Promise.all([
+// G-20: fecha_inicio_ciclo es @db.Date (medianoche UTC), así que los límites van en UTC;
+// con límites locales, en un proceso con TZ=America/Lima el día 1 caía en el mes anterior.
+const cargarPagosBalance = (anio, mesDesde, mesHasta) => Promise.all([
     prisma.pagos.findMany({
         where: {
             estado_validacion: 'APROBADO',
             cuentas_por_cobrar: {
                 inscripciones_deudas_link: {
-                    some: { fecha_inicio_ciclo: { gte: fechaInicio, lte: fechaFin } }
+                    some: {
+                        fecha_inicio_ciclo: {
+                            gte: new Date(Date.UTC(anio, mesDesde - 1, 1)),
+                            lte: new Date(Date.UTC(anio, mesHasta, 0))
+                        }
+                    }
                 }
             }
         },
@@ -57,12 +64,6 @@ const montosPorLink = (pago, catalogo) => repartirPagoEntreLinks(
     catalogo,
     pago.cuentas_por_cobrar.catalogo_conceptos
 );
-
-// Año y mes (1-12) en que el Balance cuenta un ciclo. Mensual y anual usan esta misma función.
-const mesDelCiclo = (fecha) => {
-    const f = new Date(fecha);
-    return { anio: f.getFullYear(), mes: f.getMonth() + 1 };
-};
 
 // Las filas INGRESO_MERCH / INGRESO_MATRICULA las genera la validación de un pago:
 // editarlas o borrarlas a mano las desalinearía del pago que las originó.
@@ -240,7 +241,7 @@ export const movimientosFinancierosService = {
         // Filtramos por fecha_inicio_ciclo del LINK (fecha real de inicio de clases),
         // no por fecha_inscripcion_original de la inscripción (que se pisa en cada renovación).
         // Esto decide SI el pago tiene actividad este mes.
-        const [ingresos, catalogo] = await cargarPagosBalance(fechaInicio, fechaFin);
+        const [ingresos, catalogo] = await cargarPagosBalance(anioInt, mesInt, mesInt);
 
         const reporte = {};
 
@@ -418,7 +419,7 @@ export const movimientosFinancierosService = {
         // Ingresos automáticos (pagos), agrupados por mes del CICLO (fecha_inicio_ciclo),
         // no por fecha de pago. G-17 v2: mismas funciones que obtenerResumenMensual
         // (cargarPagosBalance, montosPorLink, mesDelCiclo) para que ambos cuadren.
-        const [pagos, catalogo] = await cargarPagosBalance(fechaInicio, fechaFin);
+        const [pagos, catalogo] = await cargarPagosBalance(anioInt, 1, 12);
         const centimosPorMes = Array(12).fill(0);
         pagos.forEach(pago => {
             const montos = montosPorLink(pago, catalogo);

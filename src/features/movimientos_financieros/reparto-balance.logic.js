@@ -2,6 +2,16 @@ import { repartirEnSoles, repartirProporcional } from '../../shared/utils/dinero
 import { elegirPlanPorRegimen, esConceptoLegacy } from '../inscripciones/utils/plan-catalogo.util.js';
 
 /**
+ * G-20: año y mes (1-12) en que el Balance cuenta un ciclo. fecha_inicio_ciclo es
+ * @db.Date y Prisma la entrega como medianoche UTC: se lee en UTC para que no
+ * dependa de la zona horaria del proceso. Mensual y anual usan esta función.
+ */
+export const mesDelCiclo = (fecha) => {
+  const f = new Date(fecha);
+  return { anio: f.getUTCFullYear(), mes: f.getUTCMonth() + 1 };
+};
+
+/**
  * G-17 v2: cuánto del pago le toca a cada link en el Balance.
  *
  * Entre sedes, en proporción al precio del plan del catálogo para los días que el
